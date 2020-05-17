@@ -2,103 +2,239 @@
 #include "StringFunctions.h"
 #include <iostream>
 #include "ValueRegistration.h"
+#include <atomic>
+#include <thread>
+#include <mutex>
+
 #define ESCAPE_CHAR '\\'
 namespace jbon {
-	void removeSpaces(std::string & str)
+	void removeSpaces(std::string& str)
 	{
+		std::string newString = "";
 		for (int i = 0; i < str.size(); i++) {
 			char letter = str.at(i);
-			if (letter == ' ' || letter == '\t' || letter == '\n') {
-				str.erase(str.begin() + i);
-				i--; // whole string was moved back one, so we need to back iteration up by one
+			if (letter == ' ' || letter == '\t' || letter == '\n' || letter == '\r') {
+				continue;
+			}
+			newString.push_back(letter);
+		}
+		str = newString;
+	}
+	void indent(std::string& str, int spaces)
+	{
+		for (int i = 0; i < str.size(); i++) {
+			if (i == 0 || str.at(i - 1) == '\n') {
+				for (int j = 0; j < spaces; j++)
+					str.insert(str.begin() + i, ' ');
 			}
 		}
 	}
-	void splitTitleBody(std::string str, std::string & title, std::string & body, char bdel, char edel)
+
+	auto splitTitleBody(std::string_view str, char bdel, char edel) -> std::pair<std::string_view, std::string_view>
 	{
+		std::pair<std::string_view, std::string_view> titleBodyResult;
 		int firstDel = 0;
 		for (int i = 0; i < str.length(); i++) {
-			if (str.at(i) == bdel) {
-				title = str.substr(0, i);
+			if (str[i] == bdel) {
+				titleBodyResult.first = str.substr(0, i);
 				firstDel = i;
 				break;
 			}
 		}
 		for (int i = str.length() - 1; i >= 0; i--) {
 			if (str.at(i) == edel) {
-				body = str.substr(firstDel, 1 + i - firstDel);
-				return;
+				titleBodyResult.second = str.substr(firstDel, 1 + i - firstDel);
+				break;
 			}
 		}
+		return titleBodyResult;
 	}
-	std::vector<std::string> split(std::string str, char delim)
-	{
-		std::vector<std::string> entries;
+	void split(std::vector<std::string>& entries, std::string_view str, char delim) {
 		int last = 0;
-		str += std::string(1, delim); // adds a delimeter to the end, so you include last part too
+		//POSSIBLE OPTIMIZATION, SEARCH FOR ALL DELIMETERS AND RESERVE ON VECTOR
 		for (int i = 0; i < str.size(); i++) {
-			if (str.at(i) == delim) {
+			if (str[i] == delim) {
+				entries.push_back(std::string{ str.substr(last, i - last) });
+				last = i + 1; //it was at comma position
+			}
+		}
+		entries.push_back(std::string{ str.substr(last, str.size() - last) });
+	}
+	void split(std::vector<std::string_view>& entries, std::string_view str, char delim)
+	{
+		int last = 0;
+		//POSSIBLE OPTIMIZATION, SEARCH FOR ALL DELIMETERS AND RESERVE ON VECTOR
+		for (int i = 0; i < str.size(); i++) {
+			if (str[i] == delim) {
 				entries.push_back(str.substr(last, i - last));
 				last = i + 1; //it was at comma position
 			}
 		}
-		//no comma at the end
-		return entries;
+		entries.push_back(str.substr(last, str.size() - last));
 	}
-	std::vector<std::string> split(std::string str, std::vector<std::pair<char, char>> exclude, char delim)
-	{
-		std::vector<std::string> entries;
-		std::vector<int> counters; //corresponding exclude
-		str += std::string(1, delim); // adds a delimeter to the end, so you include last part too
-		//initialize counters
-		for (int i = 0; i < exclude.size(); i++) {
-			counters.push_back(0);
-		}
+	void split(std::vector<std::string_view>& entries, std::string_view str, ExclusionDelimeters& exclude, char delim) {
+		unsigned length = 0;
 		int last = 0;
+		int inExcluderBlock = 0;
 		for (int i = 0; i < str.size(); i++) {
-			bool open = true; //if any delimeters are open
-			//if any delimeters are used push up the counters, if theyre 0 nothing is open
-			for (int j = 0; j < exclude.size(); j++) {
-				//if theres an escape character ignore exclusion
-				if (i > 0 && str.at(i - 1) == ESCAPE_CHAR) { 
-					break;
+			const char c = str[i];
+
+			ExclusionDelimeters::iterator it = exclude.find(c);
+			if (it != exclude.end()) {
+				if (it->first == c) {
+					if (it->first == it->second) { 
+						it->counter() = ~it->counter();
+						if(it->counter() > 0)
+							inExcluderBlock++;
+						else
+							inExcluderBlock--;
+					} // handle first and second are equal edge-case
+					else {
+						it->counter()++;
+						inExcluderBlock++;
+					};
 				}
-				if (exclude.at(j).first != exclude.at(j).second) {
-					//increment or de-increment depending on if they're first or second token
-					if (str.at(i) == exclude.at(j).first) {
-						counters.at(j)++;
-					}
-					else if (str.at(i) == exclude.at(j).second) {
-						counters.at(j)--;
-					}
-				}
-				//otherwise if the pair of delimeters are the same
-				else {
-					if (str.at(i) == exclude.at(j).first && counters.at(j) < 1) {
-						counters.at(j)++;
-					}
-					else if (str.at(i) == exclude.at(j).second) {
-						counters.at(j)--;
-					}
-					
-				}
-				//if any of the counters arent closed (they're value is 0) then itll say its not open
-				if (counters.at(j) != 0) {
-					open = false;
+				else if (it->second == c) {
+					inExcluderBlock--;
+					it->counter()--;
 				}
 			}
-			if (str.at(i) == delim && open) {
-				entries.push_back(str.substr(last, i - last));
+			if (c == delim && inExcluderBlock == 0) {
+				entries.push_back(std::string_view{ str.data() + last, length });
+				length = 0;
 				last = i + 1;
 			}
+			else length++;
+
+			if ((i == str.size() - 1) && inExcluderBlock == 0) {
+				//just length because that length up there, will add it unfrotunatley
+				//std::cout << "PUSHED A WORD" << std::endl;
+				entries.push_back({ str.data() + last, length});
+			}
+
+
+			//std::cout << str << std::endl;
+			//for (int j = 0; j < i; j++)
+			//	std::cout << " ";
+			//std::cout << "^" << std::endl;
+			//std::cout << "In excluder block: " << (inExcluderBlock ? "true" : "false") << std::endl;
+			//std::cout << "{} counter:" << exclude.find('}')->counter() << std::endl;
+			//std::cout << "{} counter:" << exclude.find('{')->counter() << std::endl;
+			//std::cout << "() counter:" << exclude.find('(')->counter() << std::endl;
+			//std::cout << "() counter:" << exclude.find(')')->counter() << std::endl;
+			//std::cout << "[] counter:" << exclude.find('[')->counter() << std::endl;
+			//std::cout << "[] counter:" << exclude.find(']')->counter() << std::endl;
+			//std::cout << std::endl;
 		}
-		return entries;
+
 	}
-	std::vector<std::string> jbonSplit(std::string str, char delims)
+	void jbonSplit(std::vector<std::string_view>& parsed, std::string_view str, char delims)
 	{
-		std::vector<std::pair<char, char>> delimeters = *Registrants::getDelimeters();
-		delimeters.emplace_back('\"', '\"');
-		return split(str, delimeters, delims);
+		split(parsed, str, *Registrants::getDelimeters(), delims);
+	}
+	//void ApplyTojbonSplit(std::string_view str, std::function<void(std::string_view const&)> func)
+	//{
+	//	auto& exclude = *Registrants::getDelimeters();
+	//	constexpr char delim = ',';
+	//	int last = 0;
+	//	unsigned length = 0;
+	//	bool inExcluderBlock = false;
+	//	//thread
+	//	std::atomic<bool> done = false;
+	//	std::atomic<bool> change = false;
+	//	std::atomic<std::string_view> section;
+	//	static std::thread apply([&section, &func, &done, &change]() {
+	//		std::mutex m;
+	//		while (!done) {
+	//			if (change) {
+	//				m.lock();
+	//				change = false;
+	//				std::cout << "new section" << std::endl;
+	//				func(section);
+	//				m.unlock();
+	//			}
+	//		}
+	//	});
+	//	
+	//	for (int i = 0; i < str.size(); i++) {
+	//		const char c = str[i];
+	//		ExclusionDelimeters::iterator it = exclude.find(c);
+	//		if (it != exclude.end()) {
+	//			if (it->first == c) {
+	//				if (it->first == it->second) it->counter() = ~it->counter(); // handle first and second are equal edge-case
+	//				else it->counter()++;
+	//			}
+	//			else if (it->second == c) {
+	//				it->counter()--;
+	//			}
+	//			if (it->counter() > 0) inExcluderBlock = true;
+	//			else inExcluderBlock = false;
+	//		}
+	//		if (c == delim && !inExcluderBlock) { 
+	//			change = true;
+	//			section = { str.data() + last, length };
+	//			
+	//			//func(std::string_view((str.data() + last), length));
+	//			length = 0;
+	//			last = i + 1;
+	//		}
+	//		else length++;
+	//		if ((i == str.size() - 1) && !inExcluderBlock) {
+	//			change = true;
+	//			section = {str.data() + last, length};
+	//			//just length because that length up there, will add it unfrotunatley
+	//		}
+	//	}
+	//	//done = true;
+	//	apply.join();
+	//}
+	void jbonFileSplit(std::vector<std::string_view>& objects, std::string_view str)
+	{
+		auto& delimeters = *Registrants::getDelimeters();
+
+		unsigned length = 0;
+		int last = 0;
+		int inExcluderBlock = 0;
+		bool prevWasToken = false;
+		for (int i = 0; i < str.size(); i++) {
+			const char c = str[i];
+			ExclusionDelimeters::iterator it = delimeters.find(c);
+			if (it != delimeters.end()) {
+				if (it->first == c) {
+					if (it->first == it->second) {
+						it->counter() = ~it->counter();
+						if (it->counter() > 0)
+							inExcluderBlock++;
+						else
+							inExcluderBlock--;
+					} // handle first and second are equal edge-case
+					else {
+						it->counter()++;
+						inExcluderBlock++;
+					};
+				}
+				else if (it->second == c) {
+					inExcluderBlock--;
+					it->counter()--;
+				}
+			}
+
+			
+			if (prevWasToken && inExcluderBlock == 0) {
+				objects.push_back({str.data() + last, length});
+				last = i;
+				length = 0;
+			}
+			//special case if its the end
+			if ((i == str.size() - 1) && inExcluderBlock == 0) {
+				objects.push_back({ str.data() + last, length + 1});
+			}
+			length++;
+			if (!inExcluderBlock &&(c == '}' || c == ')')) {
+				prevWasToken = true;
+			}
+			else prevWasToken = false;
+		}
 	}
 	std::vector<std::string> splitClasses(std::string str)
 	{
@@ -143,76 +279,127 @@ namespace jbon {
 		return classObjects;
 	}
 
-	void indent(std::string& str, int spaces)
+	/**/
+	bool isNumeric(std::string_view str, bool& hasPeriods)
 	{
-		for (int i = 0; i < str.size(); i++) {
-			if (i == 0 || str.at(i - 1) == '\n') {
-				for (int j = 0; j < spaces; j++)
-					str.insert(str.begin() + i, ' ');
-			}
-		}
-	}
-	bool isFloat(std::string str)
-	{
-		int numOfNegatives = 0,
-			numOfPeriods = 0;
-		for (char& letter : str) {
-			if (letter == '.') {
-				numOfPeriods++;
-			}
-			else if (letter == '-') {
-				numOfNegatives++;
-			}
-			else if (letter < '0' || letter > '9') {
+		int periodCount = 0;
+		int length = str.length();
+		hasPeriods = false;
+		int i = 0;
+		if (str[0] == '-') {
+			if (length == 1) {
 				return false;
 			}
+			i = 1;
 		}
-		if (numOfNegatives > 1 || numOfPeriods > 1
-			|| (numOfNegatives == 1 && str.at(0) != '-')) {
-			return false;
+		for (; i < length; i++) {
+			char c = str[i];
+			if (c == '.') {
+				hasPeriods = true;
+				periodCount++;
+				if (periodCount > 1) return false;
+			}
+			else if (c < '0' || c > '9') return false;
 		}
 		return true;
 	}
-	bool isInt(std::string str)
+	bool isNumeric(std::string_view str)
 	{
-		for (char& letter : str) {
-			if (letter == '.') {
+		int periodCount = 0;
+		int length = str.length();
+		int i = 0;
+		if (str[0] == '-') {
+			if (length == 1) {
 				return false;
 			}
+			i = 1;
 		}
-		//at this point if it passes for being a float, and it has no periods its an int 
-		return isFloat(str);
+		for (; i < length; i++) {
+			char c = str[i];
+			if (c == '.') {
+				periodCount++;
+				if (periodCount > 1) return false;
+			}
+			else if (c < '0' || c > '9') return false;
+		}
+		return true;
 	}
-	bool isBool(std::string str)
+	bool isFloat(std::string_view str)
 	{
-		if (str == "true" || str == "false") {
-			return true;
-		}
-		return false;
+		return isNumeric(str);
 	}
-	bool isString(std::string str)
+	bool isInt(std::string_view str)
+	{
+		bool hasPeriods; //isNumeric inits this
+		return isNumeric(str, hasPeriods) && !hasPeriods;
+	}
+	bool isBool(std::string_view str)
+	{
+		return (str == "true" || str == "false");
+	}
+	bool isString(std::string_view str)
 	{
 		int unescapedQuotes = 0;
 		for (int i = 0; i < str.size(); i++) {
-			if ((i == 0 && str.at(i) == '\"')
-				|| (i > 0 && str.at(i) == '\"' && str.at(i - 1) != '\\')) {
+			if ((i == 0 && str[i] == '\"')
+				|| (i > 0 && str[i] == '\"' && str[i - 1] != '\\')) {
 				unescapedQuotes++;
 			}
 		}
 		//if the only two unescaped quotes are the first and last characters of string
-		return str.at(0) == '\"' && str.at(str.size() - 1) == '\"' && unescapedQuotes == 2;
+		return str[0] == '\"' && str[str.size() - 1] == '\"' && unescapedQuotes == 2;
 	}
-	bool isObject(std::string str)
+
+	ExclusionDelimeters::ExclusionDelimeters()
 	{
-		//if it begins with { and ends with }, then its an object
-		return str.at(0) == '\{' && str.at(str.size() - 1) == '\}';
 	}
-	bool isArray(std::string str)
+	ExclusionDelimeters::ExclusionDelimeters(std::initializer_list<CharPair> delimeters)
 	{
-		return str.at(0) == '[' && str.at(str.size() - 1) == ']';
+		for (auto& delim : delimeters)
+			insert(delim);
 	}
-	bool isPair(std::string str)
+	void ExclusionDelimeters::insert(CharPair const & value)
 	{
-		return str.at(0) == '<' && str.at(str.size() - 1) == '>';
+		if (value.first == value.second) {
+			lookupTable[(int)value.first] = value;
+			lookupTable[(int)value.first].counterPtr = &counters[(int)value.first];
+		}
+		else {
+			lookupTable[(int)value.first] = value;
+			lookupTable[(int)value.second] = value;
+			//ptr
+			lookupTable[(int)value.first].counterPtr = &counters[(int)value.first];
+			lookupTable[(int)value.second].counterPtr = &counters[(int)value.first];
+		}
+	}
+	void ExclusionDelimeters::insert(char first, char second)
+	{
+		if (first == second) {
+			lookupTable[(int)first] = { first,second };
+			lookupTable[(int)first].counterPtr = &counters[(int)first];
+		}
+		else {
+			lookupTable[(int)first] = { first,second };
+			lookupTable[(int)second] = { first,second };
+
+			lookupTable[(int)first].counterPtr = &counters[(int)first];
+			lookupTable[(int)second].counterPtr = &counters[(int)first];
+		}
+	}
+	ExclusionDelimeters::iterator ExclusionDelimeters::find(const char search)
+	{
+		if (lookupTable[(int)search].first != 0) {
+			return lookupTable.begin() + (int)search;
+		}
+		else
+			return this->end();
+	}
+	ExclusionDelimeters::const_iterator ExclusionDelimeters::find(const char search) const
+	{
+		if (lookupTable[(int)search].first != 0) {
+			return lookupTable.begin() + (int)search;
+		}
+		else
+			return this->end();
 	}
 }

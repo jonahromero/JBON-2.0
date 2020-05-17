@@ -5,16 +5,11 @@
 #include "StringFunctions.h"
 //serialization
 namespace jbon {
-	void ClassObject::push_back(std::string key, Value value)
-	{
-		auto it = this->fields.emplace(key, value);
-		insertOrder.push_back(it.first);
-	}
-	std::string ClassObject::serialize(std::string className)
+	std::string ClassObject::serialize(std::string className) const
 	{
 		std::string heading = className;
-		if (objectName) {
-			heading += ":"+ *objectName;
+		if (objectName.has_value()) {
+			heading += ":"+ objectName.value();
 		}
 		//only serializes values in map
 		std::string body = "";
@@ -36,9 +31,8 @@ namespace jbon {
 		for (auto it : other.insertOrder) {
 			push_back(it->first, it->second);
 		}
-		if (other.objectName) {
-			objectName = std::make_unique<std::string>(*other.objectName);
-		}
+
+		objectName = other.objectName;
 	}
 
 	ClassObject& ClassObject::operator=(const ClassObject& other)
@@ -48,23 +42,26 @@ namespace jbon {
 		for (auto it : other.insertOrder) {
 			push_back(it->first, it->second);
 		}
-		if (other.objectName) {
-			objectName = std::make_unique<std::string>(*other.objectName);
-		}
+		objectName = other.objectName;
 		return *this;
 	}
 
 	ClassObject::ClassObject() {}
-	ClassObject::~ClassObject() {}
-	std::string jbon::ClassObject::name()
+	std::string jbon::ClassObject::name() const
 	{
 		return objectName ? *objectName : "";
 	}
-	void ClassObject::print()
+	void ClassObject::addName(std::string const & name)
+	{
+		if (!objectName.has_value()) {
+			objectName = name;
+		}
+	}
+	std::string ClassObject::getPrintable() const
 	{
 		std::string heading = "";
-		if (objectName) {
-			heading += *objectName;
+		if (objectName.has_value()) {
+			heading += objectName.value();
 		}
 		std::string body = "";
 		for (auto& it : insertOrder) {
@@ -76,15 +73,12 @@ namespace jbon {
 		body = body.substr(0, body.size() - 2);
 		indent(body, 4);
 		//using substring to get rid of last comma and space
-		std::cout<< heading + "(\n" + body + "\n)\n"<<std::endl;
+		return heading + "(\n" + body + "\n)\n";
 	}
 
-	bool ClassObject::contains(std::string key)
+	std::ostream & operator<<(std::ostream & stream, const ClassObject & object)
 	{
-		return fields.count(key) > 0;
-	}
-	int ClassObject::size()
-	{
-		return fields.size();
+		stream << object.getPrintable();
+		return stream;
 	}
 }

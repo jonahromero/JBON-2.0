@@ -13,21 +13,42 @@ namespace jbon {
 		typedef std::variant<int, float, bool, std::string, ValueType*> value_t;
 		value_t var;
 		int * refrences = nullptr;
+
+		void safelySetVariant(value_t const& value);
 		//smart ptr debug
-		//static inline int count = 1;
-		//std::string refTag;
+	/*	static inline int count = 1;
+		std::string refTag;*/
 		
-		Value(value_t var);
 	public:
+		template <typename T>
+		Value(T value) {
+			Setter<T, isDerived<T, ValueType>::is>::_(value, *this);
+		}
 		Value();
 		//serializing/parsing
 		~Value();
-		static Value parse(std::string asString);
-		std::string serialize();
+		//needs to be passed something with no spaces
+		static Value parse(std::string_view asString);
+		//static Value parse(std::string_view && asString);
+		std::string serialize() const;
 		//refrence counting
 		Value(const Value& other);
 		Value& operator=(const Value& other);
+		//when u equate a Type to a value, theres some stuff you can skip.
+		template<typename T>
+		Value& operator=(const T& other) {
+			this->safelySetVariant(other);
+			return *this;
+		}
 		//variant methods
+		template <typename T>
+		T& get() { return Getter<T, isDerived<T, ValueType>::is>::_(this->var); }
+
+		template <typename T>
+		bool is() const { return Checker<T, isDerived<ValueType, T>::is>::_(*this); }
+
+		//should only be used for std::visit
+		value_t const& variant() const;
 	private:
 		template <typename T, bool B>
 		struct Getter {
@@ -54,28 +75,53 @@ namespace jbon {
 		template <typename T>
 		struct Setter<T, true> {
 			static void _(T value, Value& var) {
-				var = Value(new T(value));
+				var.safelySetVariant(new T(value));
 			}
 		};
 		template <typename T>
 		struct Setter<T, false>{
 			static void _(T value, Value& var) {
-				var = Value(value);
+				var.safelySetVariant(value);
 			}
 		};
-	public:
+		//might wanna get rid of this.
+		template <>
+		struct Setter<Value, false> {
+			static void _(Value value, Value& var) {
+				var = value;
+			}
+		};
+		//two extra specializations, because compiler assumes dumb ass shit
+		template <>
+		struct Setter<const char*, false> {
+			static void _(const char * value, Value& var) {
+				var.safelySetVariant(std::string(value));
+			}
+		};
+		template <>
+		struct Setter<double, false> {
+			static void _(double value, Value& var) {
+				var.safelySetVariant((float)value);
+			}
+		};
+		template <typename T, bool N>
+		struct Checker {
+			static bool _(Value const& value);
+		};
 		template <typename T>
-		T& get() { return Getter<T, isDerived<T, ValueType>::is>::_(this->var); }
+		struct Checker<T,true> {
+			static bool _(Value const& value) {
+				T* typePtr = dynamic_cast<T*>(std::get<ValueType*>(value.var));
+				//if its a nullptr it failed the cast
+				return (typePtr != nullptr);
+			}
+		};
 		template <typename T>
-		static Value make(T& value) {
-			Value result;
-			Setter<T, isDerived<T, ValueType>::is>::_(value, result);
-			return result;
-		}
-
-		template <typename T>
-		bool holds() { return std::holds_alternative<T>(var); }
-		//should only be used for std::visit
-		value_t& variant();
+		struct Checker<T, false> {
+			static bool _(Value const& value) {
+				return std::holds_alternative<T>(value.var);
+			}
+		};
 	};
+
 }

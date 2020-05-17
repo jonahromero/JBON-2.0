@@ -16,13 +16,12 @@ namespace jbon {
 	private:
 		friend class Value;
 		//these functions wont be used
-		virtual bool virtualIsSameType(std::string str) = 0;
-		virtual ValueType * virtualCreate(std::string str) = 0;
+		virtual bool virtualIsSameType(std::string_view str) = 0;
+		virtual ValueType * virtualCreate(std::string_view str) = 0;
 		virtual std::pair<char,char> virtualGetSurroundingDelimeters() = 0;
 		//needs to eventually be implemented
-		virtual std::string serialize() = 0;
+		virtual std::string serialize() const = 0;
 	public:
-		ValueType() {}
 		virtual ~ValueType() {}
 	};
 
@@ -33,27 +32,23 @@ namespace jbon {
 	private:
 		//register the class
 		static inline ValueRegistration<T> registered;
-		virtual std::string serialize() = 0;
+		virtual std::string serialize() const = 0;
 		//these wont ever actually be used, but they require the child to implement the static methods
-		bool virtualIsSameType(std::string str) {
-			std::cout << "hi";
-
+		bool virtualIsSameType(std::string_view str) {
 			return T::isSameType(str);
 		}
 		//should return malloced pointer of child
-		ValueType * virtualCreate(std::string str) {
+		ValueType * virtualCreate(std::string_view str) {
 			return T::create(str);
 		}
 		std::pair<char, char> virtualGetSurroundingDelimeters() {
 			return T::getSurroundingDelimeters();
 		}
 	public:
-		ValueTypeContract() {}
 		virtual ~ValueTypeContract() {}
-		
 		//user still needs to implement serialize()
 	};
-
+	//specialized template contract
 	template<typename D, typename B>
 	class isDerived {
 		class No {};

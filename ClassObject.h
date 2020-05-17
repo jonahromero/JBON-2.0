@@ -4,42 +4,41 @@
 #include <unordered_map>
 #include "value.h"
 #include "ValueType.h"
+#include <iostream>
+#include "ObjectType.h"
+#include <optional>
 
 namespace jbon {
 	
-	class ClassObject
+	class ClassObject 
+		: public ObjectType 
 	{
-		friend class GenericClass;
+		friend class BasicClass; //so it can serialize these puppies
+		friend class GenericClass; //push fields back
 	protected:
-		std::unique_ptr<std::string> objectName;
-		typedef std::unordered_map<std::string, Value> fields_t;
-		fields_t fields;
-		std::vector<fields_t::iterator> insertOrder;
-		void push_back(std::string key, Value value); //properly adds pair to object
-		std::string serialize(std::string className);
+		//names are optional
+		std::optional<std::string> objectName;
+		//serialization method
+		std::string serialize(std::string className) const;
+		std::string getPrintable() const; //this it without the name
 	public:
+		ClassObject();
 		//moving overloads for unique_ptr
 		ClassObject(const ClassObject& other);
 		ClassObject& operator=(const ClassObject&);
-		ClassObject();
-		virtual ~ClassObject();
-		std::string name();
-		//the at methods are to edit an exsisting type at a key
-		template <typename T>
-		T& at(std::string key) {
+
+		Value const& operator[](std::string const& key) {
 			auto it = fields.find(key);
-			return it->second.get<T>();
+			if (it == fields.end()) {
+				std::cerr << "Invalid Key Search:\""<<key<<"\""<< std::endl;
+				throw "Invalid Key Search";
+			}
+			return it->second;
 		}
-		//the set methods can change the value type at a field to what they want
-		template <typename T>
-		void set(std::string key, T value) {
-			auto it = fields.find(key);
-			it->second = Value::make(value);
-		}
-		bool contains(std::string key);
-		int size();
-		//helper functions
-		virtual void print();
+		//how to print out
+		std::string name() const;
+		void addName(std::string const&);
+		friend std::ostream& operator << (std::ostream& stream, const ClassObject& object);
 	};
 }
 

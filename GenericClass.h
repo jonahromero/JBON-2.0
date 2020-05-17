@@ -1,35 +1,63 @@
 #pragma once
-#include "ClassObject.h"
 #include <algorithm>
 #include <functional>
+#include "BasicClass.h"
 
 namespace jbon {
-	class GenericClass
+	class GenericClass :
+		public BasicClass
 	{
-
-		std::string className;
-		std::vector<std::string> keys; //all the keys from the schema
-		std::vector<ClassObject> objects; //all the associated objects
+	private:
+		ObjectCollection objects;
+		//unique function, that simply adds an object to the collection
+		ClassObject& addObject(const ClassObject& object); //no one can make a classObject besides GenericClass, so private
+		void reserve(size_t size);
 	public:
-		//iterators and containers
-		typedef std::vector<ClassObject>::iterator iterator;
-		typedef std::vector<ClassObject>::const_iterator const_iterator;
+		//constructor and yea
+		GenericClass(std::string_view schema);
+		GenericClass();
+
+		//get the associated objects
+		ObjectCollection& getObjects();
+
+		//serialization/string functions
+		std::string serialize() const;
+		std::string serializeBody() const;
+		friend std::ostream& operator<< (std::ostream& stream, GenericClass& genericClass);
+		void makeAndAddObject(std::string_view data); //parses through data to add object
+
+		//functions for making new object
+		template<typename...args>
+		ClassObject& constructObject(args...list) {
+			if (keys.size() != sizeof...(list)) {
+				std::cerr << "Generic Class " << className << " has " << keys.size() <<
+					" parameters, but was only constructed with " << sizeof...(list) << std::endl;
+				throw;
+			}
+			ClassObject classObject;
+			push_backOnObject(classObject, 0, list...);
+			return addObject(classObject);
+		}
+		template<typename...args>
+		ClassObject& constructNamedObject(std::string name, args...list) {
+			auto& object = constructObject(list...);
+			object.objectName = std::make_unique<std::string>(name);
+			return object;
+		}
+		ClassObject& constructObject(std::vector<Value> values);
+		ClassObject& constructNamedObject(std::string name, std::vector<Value> values);
 		
-		iterator begin() { return objects.begin(); }
-		iterator end() { return objects.end(); }
-
-		iterator find(std::string name); //finds a certain object based on name
-		void erase(iterator it);
-		int size();
-		int count();
-		bool empty();
-
-		GenericClass(std::string schema);
-		~GenericClass();
-		//my functions
-		std::string serialize();
-		std::string name();
-		iterator constructObject(std::vector<Value> values);
-		iterator constructObject(std::string name, std::vector<Value> values);
+		//some sneaky template garbage
+	private:
+		template<typename T>
+		void push_backOnObject(ClassObject& object, int key, T value) {
+			object.push_back(keys.at(key), value);
+		}
+		//allows to add parameter packs to an object
+		template<typename T, typename...args>
+		void push_backOnObject(ClassObject& object, int key, T value, args...list){
+			object.push_back(keys.at(key), value);
+			push_backOnObject(object, ++key, list...);
+		}
 	};
 }

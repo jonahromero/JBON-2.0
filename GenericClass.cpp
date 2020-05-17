@@ -6,97 +6,77 @@
 #include "StringFunctions.h"
 #include "value.h"
 #include "ClassObject.h"
-
+#include<optional>
 namespace jbon {
-	std::string GenericClass::serialize()
+	ObjectCollection & GenericClass::getObjects()
 	{
-		//make class schema
-		std::string classSchema = className,
-					body = "";
-		//for the keys, make a giant string of them
-		for (int i = 0; i < keys.size(); i++) {
-			if(i != keys.size() - 1)
-				body += keys.at(i) + ",\n";
-			else
-				body += keys.at(i) + "\n";
-		}
-		//indent all the keys
-		indent(body, 4);
-		//add the closing brackets and attach to classSchema
-		classSchema += " {\n" + body + "}\n";
+		return objects;
+	}
+
+	std::string GenericClass::serialize() const
+	{
+		return BasicClass::serialize() + serializeBody();
+	}
+
+	std::string GenericClass::serializeBody() const
+	{
 		//serialize objects
 		std::string objectString = "";
-		for (auto& object : objects) {
+		for (const auto& object : objects) {
 			objectString += object.serialize(className);
 		}
-		return classSchema + objectString;
-	}
-	GenericClass::iterator GenericClass::find(std::string name)
-	{
-		return std::find_if(objects.begin(), objects.end(), std::bind([](std::string name, auto& object) ->bool {
-			if (object.name() == name) {
-				return true;
-			}
-			return false;
-		},name, std::placeholders::_1));
-	}
-	void GenericClass::erase(iterator it)
-	{
-		objects.erase(it);
-	}
-	int GenericClass::size()
-	{
-		return objects.size();
-	}
-	int GenericClass::count()
-	{
-		return objects.size();
-	}
-	bool GenericClass::empty()
-	{
-		return objects.empty();
-	}
-	GenericClass::GenericClass(std::string schema)
-	{
-		std::string body, field;
-		removeSpaces(schema);
-		splitTitleBody(schema, className, body, '{','}');
-		keys = split(body.substr(1, body.size() - 2), ',');
+		return objectString;
 	}
 
-	GenericClass::~GenericClass(){}
-	std::string GenericClass::name()
+	ClassObject & GenericClass::addObject(const ClassObject & object)
 	{
-		return className;
+		objects.objects.push_back(object);
+		return objects.objects[objects.size() - 1];
 	}
-	GenericClass::iterator GenericClass::constructObject(std::vector<Value> values)
+
+	void GenericClass::reserve(size_t size)
+	{
+		objects.objects.reserve(size);
+	}
+
+	GenericClass::GenericClass(std::string_view schema) : BasicClass(schema) {}
+	GenericClass::GenericClass() {}
+
+	void GenericClass::makeAndAddObject(std::string_view object)
+	{
+		std::optional<std::string> name;
+		std::vector<Value> values;
+		parseObject(values, object, name);
+		if (name) {
+			constructNamedObject(name.value(), values);
+		}
+		else {
+			constructObject(values);
+		}
+	}
+	ClassObject& GenericClass::constructObject(std::vector<Value> values)
 	{
 		if (keys.size() != values.size()) {
 			std::cerr << "Generic Class " << className << " has " << keys.size() <<
 				" parameters, but was only constructed with " << values.size() << std::endl;
-			return end();
+			throw;
 		}
 		ClassObject classObject;
 		for (int i = 0; i < keys.size(); i++) {
 			classObject.push_back(keys.at(i), values.at(i));
 		}
-		objects.push_back(classObject);
-		return objects.begin() + objects.size() - 1;
+		//accesing objects in our ObjectCollection
+		return addObject(classObject);
 	}
-	GenericClass::iterator GenericClass::constructObject(std::string name, std::vector<Value> values)
+	ClassObject& GenericClass::constructNamedObject(std::string name, std::vector<Value> values)
 	{
-		if (keys.size() != values.size()) {
-			std::cerr << "Generic Class " << name << " has " << keys.size() <<
-				" parameters, but was only constructed with " << values.size() << std::endl;
-			return end();
-		}
-		ClassObject classObject;
-		classObject.objectName = std::make_unique<std::string>(name);
-		for (int i = 0; i < keys.size(); i++) {
-			//std::cout << keys.at(i) << ":" << values.at(i).serialize() << std::endl;
-			classObject.push_back(keys.at(i), values.at(i));
-		}
-		objects.push_back(classObject);
-		return objects.begin() + objects.size() - 1;
+		auto& object = constructObject(values);
+		object.addName(name);
+		return object;
+	}
+	std::ostream & operator<<(std::ostream & stream, GenericClass & genericClass)
+	{
+		stream << genericClass.serialize();
+		return stream;
 	}
 }
